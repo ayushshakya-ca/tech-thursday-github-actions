@@ -6,11 +6,13 @@ on:
       - main
 
 jobs:
-  build-deploy:
+  deploy:
     runs-on: self-hosted
+
     permissions:
       id-token: write
       contents: read
+
     env:
       PROJECT_ID: internal-sandbox-446612
       REGION: asia-south1
@@ -18,13 +20,14 @@ jobs:
       IMAGE: my-docker-app
       CLUSTER_NAME: my-gke-cluster
       CLUSTER_LOCATION: asia-south1-a
-      NAMESPACE: default
+      HEALTHCHECK_URL: http://my-docker-app.default.svc.cluster.local:5000/health
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    # Authenticate GitHub Actions using Workload Identity
-    - name: Authenticate to Google Cloud (OIDC)
+    # Authenticate once
+    - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v3
       with:
         workload_identity_provider: projects/196053730058/locations/global/workloadIdentityPools/demo-tt-github-pool/providers/github-provider
@@ -34,55 +37,44 @@ jobs:
       uses: google-github-actions/setup-gcloud@v3
 
     - name: Configure Docker
-      run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
-      
+      run: gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+
+    # Build & Push
     - name: Build and Push Docker Image
       run: |
-         docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/${{ env.IMAGE }}:${{ github.sha }} .
-         docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/${{ env.IMAGE }}:${{ github.sha }}
+        docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:${{ github.sha }} .
+        docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:${{ github.sha }}
 
+    # Get GKE Credentials
     - name: Get GKE Credentials
       uses: google-github-actions/get-gke-credentials@v2
       with:
         cluster_name: ${{ env.CLUSTER_NAME }}
         location: ${{ env.CLUSTER_LOCATION }}
+        project_id: ${{ env.PROJECT_ID }}
 
+    # Deploy
     - name: Deploy to GKE
       run: |
-        kubectl set image deployment/${{ env.IMAGE }} \
-        ${{ env.IMAGE }}=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/${{ env.IMAGE }}:${{ github.sha }}
-        kubectl rollout status deployment/${{ env.IMAGE }} --timeout=60s
+        kubectl set image deployment/$IMAGE \
+        $IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:${{ github.sha }}
 
-  health-check:
-    runs-on: self-hosted
-    needs: build-deploy
-    env:
-      HEALTHCHECK_URL: http://my-docker-app.default.svc.cluster.local:5000/health
-      IMAGE: my-docker-app
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+        kubectl rollout status deployment/$IMAGE --timeout=120s
 
-    - name: Get GKE Credentials
-      uses: google-github-actions/get-gke-credentials@v2
-      with:
-        cluster_name: my-gke-cluster
-        location: asia-south1-a
-
-    - name: Health Check
-      id: health
+    # Health Check + Auto Rollback
+    - name: Health Check and Rollback if Needed
       run: |
-        echo "Waiting 30s before health check..."
+        echo "Waiting 30 seconds before health check..."
         sleep 30
-        STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.HEALTHCHECK_URL }})
-        echo "Health check returned status $STATUS_CODE"
-        if [ "$STATUS_CODE" -ne 200 ]; then
-          echo "Health check failed!"
-          exit 1
 
-    - name: Rollback Deployment (if health check failed)
-      if: failure()
-      run: |
-        echo "Rolling back deployment..."
-        kubectl rollout undo deployment/${{ env.IMAGE }}
-        kubectl rollout status deployment/${{ env.IMAGE }}
+        STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" $HEALTHCHECK_URL)
+        echo "Health check returned: $STATUS_CODE"
+
+        if [ "$STATUS_CODE" -ne 200 ]; then
+          echo "Health check failed! Rolling back..."
+          kubectl rollout undo deployment/$IMAGE
+          kubectl rollout status deployment/$IMAGE
+          exit 1
+        else
+          echo "Application is healthy"
+        fi
