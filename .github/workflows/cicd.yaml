@@ -33,12 +33,13 @@ jobs:
     - name: Setup gcloud
       uses: google-github-actions/setup-gcloud@v2
 
-    - name: Docker login
-      uses: docker/login-action@v3
+    - name: Docker Auth
+      id: docker-auth
+      uses: 'docker/login-action@v1'
       with:
-        registry: ${{ env.REGION }}-docker.pkg.dev
-        username: oauth2accesstoken
-        password: ${{ steps.auth.outputs.access_token }}
+        username: 'oauth2accesstoken'
+        password: '${{ steps.auth.outputs.access_token }}'
+        registry: 'asia-south1-docker.pkg.dev'
         
     - name: Build and Push Docker Image
       run: |
