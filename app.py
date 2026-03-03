@@ -8,7 +8,7 @@ app = Flask(__name__)
 # =========================
 # APPLICATION READINESS FLAG
 # =========================
-app_ready = False
+FORCE_FAIL_HEALTH = os.environ.get("FORCE_FAIL_HEALTH", "false").lower() == "true"
 
 
 def initialize_application():
@@ -43,7 +43,7 @@ def health():
     - 503 while starting
     """
     if app_ready:
-        return jsonify(status="healthy"), 300
+        return jsonify(status="healthy"), 200
     else:
         return jsonify(status="starting"), 503
 
