@@ -43,7 +43,7 @@ def health():
     - 503 while starting
     """
     if app_ready:
-        return jsonify(status="healthy"), 200
+        return jsonify(status="healthy"), 300
     else:
         return jsonify(status="starting"), 503
 
@@ -60,5 +60,5 @@ def home():
 # APPLICATION START
 # =========================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 50))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
