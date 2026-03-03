@@ -37,13 +37,8 @@ threading.Thread(target=initialize_application, daemon=True).start()
 # =========================
 # HEALTH ENDPOINT
 # =========================
-@app.route("/health", methods=["GET"])
+@app.route("/health", methods=["GET"], strict_slashes=False)
 def health():
-    """
-    Returns:
-    - 200 when ready
-    - 503 while starting
-    """
     if app_ready:
         return jsonify(status="healthy"), 200
     else:
