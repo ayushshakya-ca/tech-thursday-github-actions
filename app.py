@@ -8,9 +8,9 @@ app = Flask(__name__)
 # =========================
 # APPLICATION READINESS FLAG
 # =========================
-
-#FORCE_FAIL_HEALTH = os.environ.get("FORCE_FAIL_HEALTH", "false").lower() == "false"
 app_ready = False
+# Optional flag to force health check failure
+#FORCE_FAIL_HEALTH = os.environ.get("FORCE_FAIL_HEALTH", "false").lower() == "false"
 
 
 def initialize_application():
@@ -24,7 +24,7 @@ def initialize_application():
     global app_ready
     print("Initializing application...")
 
-    time.sleep(10)  # simulate startup delay
+    time.sleep(5)  # simulate startup delay
 
     app_ready = True
     print("Application is now HEALTHY")
