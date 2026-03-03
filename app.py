@@ -8,7 +8,7 @@ app = Flask(__name__)
 # =========================
 # APPLICATION READINESS FLAG
 # =========================
-FORCE_FAIL_HEALTH = os.environ.get("FORCE_FAIL_HEALTH", "false").lower() == "true"
+FORCE_FAIL_HEALTH = os.environ.get("FORCE_FAIL_HEALTH", "false").lower() == "false"
 
 
 def initialize_application():
