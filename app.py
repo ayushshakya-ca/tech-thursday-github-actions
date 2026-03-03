@@ -263,7 +263,7 @@ footer{
 <body>
 
 <header>
-<div class="logo">✈️ TravelX</div>
+<div class="logo">✈️ TravelXYZ</div>
 
 <nav>
 <ul id="menu">
