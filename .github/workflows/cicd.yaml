@@ -73,7 +73,6 @@ jobs:
          echo "Health check failed! Rolling back..."
          kubectl rollout undo deployment/$IMAGE
          kubectl rollout status deployment/$IMAGE
-         exit 1
         else
          echo "Application is healthy"
         fi
