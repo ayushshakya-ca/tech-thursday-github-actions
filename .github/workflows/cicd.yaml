@@ -135,6 +135,7 @@ jobs:
           done
 
           echo "Application failed health check"
+          exit 1
 
 # -------------------------------
 # Stage 4 : Rollback
