@@ -81,7 +81,7 @@ jobs:
           kubectl set image deployment/$IMAGE \
           $IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:${{ github.sha }}
 
-          kubectl rollout status deployment/$IMAGE --timeout=120s
+          kubectl rollout status deployment/$IMAGE --timeout=160s
 
 # -------------------------------
 # Stage 3 : Health Check
