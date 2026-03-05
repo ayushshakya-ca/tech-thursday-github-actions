@@ -1,78 +1,176 @@
-name: CI-CD
+name: CI-CD Pipeline
 
 on:
   push:
     branches:
       - main
 
+env:
+  PROJECT_ID: internal-sandbox-446612
+  REGION: asia-south1
+  REPO: my-docker-repo
+  IMAGE: my-docker-app
+  CLUSTER_NAME: my-gke-cluster
+  CLUSTER_LOCATION: asia-south1-a
+
 jobs:
-  deploy:
+
+# -------------------------------
+# Stage 1 : Build & Push Image
+# -------------------------------
+  push:
+    name: Build and Push Image
     runs-on: self-hosted
 
     permissions:
       id-token: write
       contents: read
 
-    env:
-      PROJECT_ID: internal-sandbox-446612
-      REGION: asia-south1
-      REPO: my-docker-repo
-      IMAGE: my-docker-app
-      CLUSTER_NAME: my-gke-cluster
-      CLUSTER_LOCATION: asia-south1-a
-      HEALTHCHECK_URL: http://my-docker-app.default.svc.cluster.local:5000/health
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/196053730058/locations/global/workloadIdentityPools/demo-tt-github-pool/providers/github-provider
+          service_account: github-runner-sa-demo@internal-sandbox-446612.iam.gserviceaccount.com
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+
+      - name: Build and Push Image
+        run: |
+          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:${{ github.sha }} .
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:${{ github.sha }}
+
+# -------------------------------
+# Stage 2 : Deploy to GKE
+# -------------------------------
+  deploy:
+    name: Deploy to GKE
+    runs-on: self-hosted
+    needs: push
+
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/196053730058/locations/global/workloadIdentityPools/demo-tt-github-pool/providers/github-provider
+          service_account: github-runner-sa-demo@internal-sandbox-446612.iam.gserviceaccount.com
 
-    # Authenticate once
-    - name: Authenticate to Google Cloud
-      uses: google-github-actions/auth@v3
-      with:
-        workload_identity_provider: projects/196053730058/locations/global/workloadIdentityPools/demo-tt-github-pool/providers/github-provider
-        service_account: github-runner-sa-demo@internal-sandbox-446612.iam.gserviceaccount.com
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v3
 
-    - name: Setup gcloud
-      uses: google-github-actions/setup-gcloud@v3
+      - name: Get GKE Credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER_NAME }}
+          location: ${{ env.CLUSTER_LOCATION }}
+          project_id: ${{ env.PROJECT_ID }}
 
-    - name: Configure Docker
-      run: gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+      - name: Deploy Application
+        run: |
+          kubectl set image deployment/$IMAGE \
+          $IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:${{ github.sha }}
 
-    # Build & Push
-    - name: Build and Push Docker Image
-      run: |
-        docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:${{ github.sha }} .
-        docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:${{ github.sha }}
+          kubectl rollout status deployment/$IMAGE --timeout=120s
 
-    # Get GKE Credentials
-    - name: Get GKE Credentials
-      uses: google-github-actions/get-gke-credentials@v2
-      with:
-        cluster_name: ${{ env.CLUSTER_NAME }}
-        location: ${{ env.CLUSTER_LOCATION }}
-        project_id: ${{ env.PROJECT_ID }}
+# -------------------------------
+# Stage 3 : Health Check
+# -------------------------------
+  health-check:
+    name: Health Check
+    runs-on: self-hosted
+    needs: deploy
 
-    # Deploy
-    - name: Deploy to GKE
-      run: |
-        kubectl set image deployment/$IMAGE \
-        $IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:${{ github.sha }}
+    permissions:
+      id-token: write
+      contents: read
 
-        kubectl rollout status deployment/$IMAGE --timeout=120s
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/196053730058/locations/global/workloadIdentityPools/demo-tt-github-pool/providers/github-provider
+          service_account: github-runner-sa-demo@internal-sandbox-446612.iam.gserviceaccount.com
 
-    # Health Check + Auto Rollback
-    - name: Health Check inside cluster
-      run: |
-        POD=$(kubectl get pods -l app=$IMAGE -o jsonpath="{.items[0].metadata.name}")
-        echo $POD
-        echo $IMAGE
-        STATUS_CODE=$(kubectl exec $POD -- curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health)
-        echo "Health check returned: $STATUS_CODE"
-        if [ "$STATUS_CODE" -ne 200 ]; then
-         echo "Health check failed! Rolling back..."
-         kubectl rollout undo deployment/$IMAGE
-         kubectl rollout status deployment/$IMAGE
-        else
-         echo "Application is healthy"
-        fi
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Get GKE Credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER_NAME }}
+          location: ${{ env.CLUSTER_LOCATION }}
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Health Check inside cluster
+        run: |
+          POD=$(kubectl get pods -l app=$IMAGE -o jsonpath="{.items[0].metadata.name}")
+          echo "Checking health of pod: $POD"
+
+          MAX_WAIT=30
+          INTERVAL=5
+          ELAPSED=0
+          STATUS_CODE=503
+
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            STATUS_CODE=$(kubectl exec $POD -- curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health)
+            echo "Health check returned: $STATUS_CODE"
+
+            if [ "$STATUS_CODE" -eq 200 ]; then
+              echo "Application is healthy"
+              exit 0
+            fi
+
+            echo "Application not ready yet, waiting $INTERVAL seconds..."
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          echo "Application failed health check"
+          exit 1
+
+# -------------------------------
+# Stage 4 : Rollback
+# -------------------------------
+  rollback:
+    name: Rollback Deployment
+    runs-on: self-hosted
+    needs: health-check
+    if: failure()
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/196053730058/locations/global/workloadIdentityPools/demo-tt-github-pool/providers/github-provider
+          service_account: github-runner-sa-demo@internal-sandbox-446612.iam.gserviceaccount.com
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Get GKE Credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER_NAME }}
+          location: ${{ env.CLUSTER_LOCATION }}
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Rollback Deployment
+        run: |
+          echo "Rolling back deployment..."
+          kubectl rollout undo deployment/$IMAGE
+          kubectl rollout status deployment/$IMAGE
