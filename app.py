@@ -24,7 +24,7 @@ def initialize_application():
     global app_ready
     print("Initializing application...")
 
-    time.sleep(50)  # simulate startup delay
+    time.sleep(100)  # simulate startup delay
 
     app_ready = True
     print("Application is now HEALTHY")
